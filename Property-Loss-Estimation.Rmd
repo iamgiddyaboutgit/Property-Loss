@@ -1,0 +1,191 @@
+---
+title: "Property Loss Estimation"
+author: "Justin Patterson"
+header-includes:
+   - \usepackage{amssymb}
+output:
+  html_document:
+    df_print: paged
+    toc: TRUE
+    toc_float:
+      collapsed: false
+knit: (function(inputFile, encoding) { rmarkdown::render(inputFile, encoding = encoding,
+  output_file = "index.html") })
+---
+
+```{r include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r}
+library(ggplot2)
+# library(ggfortify)
+# library(VGAM)
+library(dplyr)
+library(scales)
+#library(boot)
+#library(fitdistrplus)
+#library(moments)
+#library(stringr)
+# library(sqldf)
+```
+
+# Data Exploration
+Our data consists of insurance claims made after fire damage. We will assume that our data comprises
+
+Let's look at some summary statistics of the claims.
+
+```{r}
+prop_loss = read.csv("PropLoss.csv")
+total_loss = prop_loss$Total.Loss
+rm(prop_loss)
+summary(total_loss)
+```
+
+Notice that the range of the claims is in the millions. 
+Let's naively try making a histogram of the total loss claimed.
+
+```{r}
+hist(total_loss, main = "Total Loss", xlab = "")
+```
+
+The claims look extremely right-skewed. How many claims were there for $0?
+
+```{r}
+num_claims = length(total_loss)
+num_zero_claims = length(total_loss[total_loss == 0])
+proportion_zero_claims =  num_zero_claims/num_claims
+```
+
+There were `r num_zero_claims` claims for $0. This is `r round(proportion_zero_claims * 100, 2)`% of the claims.
+
+## Skewness
+
+Let's compute \(G_{1}\), the Adjusted Fisher–Pearson Standardized Moment Coefficient^[[1]](https://en.wikipedia.org/wiki/Skewness#Sample_skewness)^ to get an idea of the population skewness.
+
+\[
+G_{1} = \frac{\sqrt{n\left(n-1\right)}}{n-2} \cdot \frac{\frac{1}{n}\sum_{i=1}^{n}\left(x_{i}-\bar{x}\right)^{3}}{\left[\frac{1}{n}\sum_{i=1}^{n}\left(x_{i}-\bar{x}\right)^{2}\right]^{3/2}}
+\]
+
+```{r}
+mean_claim = mean(total_loss)
+sqrt(num_claims*(num_claims - 1))/(num_claims-2)*(1/num_claims*sum((total_loss - mean_claim)^3))/(1/num_claims*sum((total_loss - mean_claim)^2))^(3/2)
+```
+
+For comparison, a symmetric distribution would have a skewness of 0. An exponential distribution would have a skewness of 2.
+
+## Excess Kurtosis
+Excess kurtosis measures the heaviness of the tails of a distribution in relation to the normal distribution. Distributions with fat tails will have a positive excess kurtosis.^[[2]](https://en.wikipedia.org/wiki/Kurtosis#Excess_kurtosis)^ We expect our distribution to have positive excess kurtosis because both high-valued properties and accidents are rare. We will estimate the population excess kurtosis by using the statistic
+
+\[
+G_{2} = 
+\frac{\left(n+1\right)n\left(n-1\right)}
+    {\left(n-2\right)\left(n-3\right)}
+\cdot
+\frac{\sum_{i=1}^{n}\left(x_{i}-\bar{x}\right)^{4}}
+    {\left[\sum_{i=1}^{n}\left(x_{i}-\bar{x}\right)^{2}\right]^{2}}
+-3
+\cdot
+\frac{\left( n-1 \right)^{2}}
+    {\left( n-2 \right)\left( n-3 \right)}
+\]
+
+```{r}
+((num_claims + 1) * (num_claims) * (num_claims - 1)) /
+((num_claims - 2) * (num_claims - 3)) *
+sum((total_loss - mean_claim)^4) /
+(sum((total_loss - mean_claim)^2))^2 - 3 *
+((num_claims - 1)^2) /
+((num_claims - 2) * (num_claims - 3))
+```
+
+## Empirical CDF
+
+```{r}
+total_loss_ecdf = ecdf(total_loss)
+plot(total_loss_ecdf, main = "Empirical Cumulative Distribution Function\n of Total Loss")
+```
+
+We can zoom in around the 80th percentile.
+
+```{r}
+plot(total_loss_ecdf, main = "Empirical Cumulative Distribution Function\n of Total Loss", xlim = c(2e4,6e4), ylim = c(0.7, 0.9))
+```
+
+```{r}
+# This finds the 80th percentile of our sample data.
+q80 = quantile(total_loss_ecdf, 0.8)
+```
+
+Our sample point estimate of the 80th percentile is `r dollar(q80)`.
+
+The Dvoretzky–Kiefer–Wolfowitz Inequality^[[3]](https://en.wikipedia.org/wiki/Dvoretzky%E2%80%93Kiefer%E2%80%93Wolfowitz_inequality)^ allows for the construction of simultaneous confidence bands around this Emperical Cumulative Density Function (ECDF). The inequality is non-parametric so it is not necessary to first fit a distribution to the claims. We will choose \(\alpha = 0.05\). The inequality states:
+
+
+
+\[
+P\left(\sup_{x \in \mathbb{R}} \left| F_{n} \left( x \right) - F \left( x \right)\right| > \epsilon \right) \le 2e^{-2n\epsilon ^{2}} = \alpha
+\]
+
+or, with probability \(1 - \alpha\), the interval containing the true CDF is 
+
+\[
+F_{n} \left(x \right) - \epsilon \leq F \left(x \right) 
+\leq F_{n} \left(x \right) + \epsilon \quad \text{where} \ \epsilon = \sqrt{\frac{\ln \frac{2}{\alpha}}{2n}}
+\]
+
+```{r}
+alpha = 0.05
+epsilon = sqrt(log(2/alpha)/(2*num_claims))
+```
+
+For our problem, \(\epsilon =\) `r round(epsilon, 4)`. 
+
+```{r}
+# This gets the Dvoretzky–Kiefer–Wolfowitz lower bound.
+DKW_lb = function(x){
+    total_loss_ecdf(x) - epsilon
+}
+
+# This gets the Dvoretzky–Kiefer–Wolfowitz upper bound.
+DKW_ub = function(x){
+    total_loss_ecdf(x) + epsilon
+}
+
+# Make a graph.
+ggplot() +
+    xlim(2e4,6e4) + 
+    ylim(0.7,0.9) +
+    geom_function(
+        fun = DKW_lb, 
+        col = 'red'
+    ) +
+    geom_function(
+        fun = DKW_ub, 
+        col = 'red'
+    ) +
+    stat_function(
+        fun = total_loss_ecdf,
+        col = "black",
+        geom = "step"
+    ) +
+    labs(title = "Simultaneous 95% Confidence Bands for the True CDF",
+         x = "x = Total Loss ($)",
+         y = "P(X<=x)")
+
+```
+
+
+One weakness of the Dvoretzky–Kiefer–Wolfowitz bands is that their coverage probability is higher nearer the median of the distribution but lower near the tails. The Learned-Miller and DeStefano confidence bands^[[4]](https://arxiv.org/pdf/cs/0504091.pdf)^ are another alternative. These bands do not suffer from the same weakness as the Dvoretzky–Kiefer–Wolfowitz bands because they allow the coverage probability to be approximately equal throughout the entire support.
+
+## Benford's Law
+# Reference
+1. [Adjusted Fisher–Pearson Standardized Moment Coefficient](https://en.wikipedia.org/wiki/Skewness#Sample_skewness)
+
+2. [Excess Kurtosis](https://en.wikipedia.org/wiki/Kurtosis#Excess_kurtosis)
+
+3. [Dvoretzky–Kiefer–Wolfowitz Inequality](https://en.wikipedia.org/wiki/Dvoretzky%E2%80%93Kiefer%E2%80%93Wolfowitz_inequality)
+
+4. [A Probabilistic Upper Bound on
+Differential Entropy](https://arxiv.org/pdf/cs/0504091.pdf)
+
