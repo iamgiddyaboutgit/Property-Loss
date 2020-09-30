@@ -22,6 +22,7 @@ library(ggplot2)
 # library(ggfortify)
 # library(VGAM)
 library(dplyr)
+library(kableExtra)
 library(scales)
 #library(boot)
 #library(fitdistrplus)
@@ -109,17 +110,77 @@ plot(total_loss_ecdf, main = "Empirical Cumulative Distribution Function\n of To
 We can zoom in around the 80th percentile.
 
 ```{r}
-plot(total_loss_ecdf, main = "Empirical Cumulative Distribution Function\n of Total Loss", xlim = c(2e4,6e4), ylim = c(0.7, 0.9))
-```
-
-```{r}
 # This finds the 80th percentile of our sample data.
 q80 = quantile(total_loss_ecdf, 0.8)
+
+plot(total_loss_ecdf, main = "Empirical Cumulative Distribution Function\n of Total Loss", xlim = c(2e4,6e4), ylim = c(0.7, 0.9))
+abline(h = 0.8, v = q80, col = "red")
 ```
 
 Our sample point estimate of the 80th percentile is `r dollar(q80)`.
 
-The Dvoretzky–Kiefer–Wolfowitz Inequality^[[3]](https://en.wikipedia.org/wiki/Dvoretzky%E2%80%93Kiefer%E2%80%93Wolfowitz_inequality)^ allows for the construction of simultaneous confidence bands around this Emperical Cumulative Density Function (ECDF). The inequality is non-parametric so it is not necessary to first fit a distribution to the claims. We will choose \(\alpha = 0.05\). The inequality states:
+
+
+## Are Claims Continuous or Discrete?
+
+```{r}
+# create a function to extract the last n digits from a numeric vector, x.
+bben_tail <- function(x, n){
+    sapply(
+      lapply(
+        strsplit(
+          as.character(x), split = ""
+        ), 
+        FUN = tail, 
+        n = n
+      ),
+    paste,
+    collapse = ""
+    )
+}
+
+# Extract the last 2 digits (if possible) from each claim.
+last_2_digits <- sapply(total_loss, bben_tail, n = 2) 
+
+last_2_digits_tally = c(sum(last_2_digits == "0"),
+                                        sum(last_2_digits == "00"),
+                                        sum(last_2_digits != "0" & last_2_digits != "00")
+)
+
+last_2_digits_df = data.frame(last_2 = c("0", "00", "other"),
+                              count = last_2_digits_tally,
+                              prop = round(last_2_digits_tally/num_claims, 4)
+)
+
+last_2_digits_df %>% kable(col.names = c("Last Digit(s) of Total Loss", "Number of Claims", "Proportion")) %>% kable_styling(full_width = FALSE)
+```
+
+We can see that it is very common for claims to be rounded to the nearest $100. What happens when we admit the last 3 digits into consideration?
+
+```{r}
+# extract the last 3 digits from each claim
+last_3_digits <- sapply(total_loss, bben_tail, n = 3) 
+
+last_3_digits_tally = c(sum(last_3_digits == "0"),
+                                        sum(last_3_digits == "00"),
+                                        sum(last_3_digits == "000"),
+                                        sum(last_3_digits == "500"),
+                                        sum(last_3_digits != "0" & last_3_digits != "00" & last_3_digits != "000" & last_3_digits != "500")
+)
+
+last_3_digits_df = data.frame(last_3 = c("0", "00", "000", "500", "other"),
+                              count = last_3_digits_tally,
+                              proportion = round(last_3_digits_tally/num_claims, 4)
+)
+
+last_3_digits_df %>% kable(col.names = c("Last Digit(s) of Total Loss", "Number of Claims", "Proportion")) %>% kable_styling(full_width = FALSE)
+```
+
+Now we see that the only claims that were rounded to the nearest $100 were those of more than $1000. This makes sense. For larger claims, it is difficult to give an estimate of the exact loss. Despite this discrete nature of the claims, we will assume that they are continuous for simplicity.
+
+# Quantile Estimation Using the Empirical CDF
+
+The Dvoretzky–Kiefer–Wolfowitz Inequality^[[3]](https://en.wikipedia.org/wiki/Dvoretzky%E2%80%93Kiefer%E2%80%93Wolfowitz_inequality)^ allows for the construction of simultaneous confidence bands around the Emperical CDF. The inequality is non-parametric so it is not necessary to first fit a distribution to the claims. We will choose \(\alpha = 0.05\). The inequality states:
 
 \[
 P\left(\sup_{x \in \mathbb{R}} \left| F_{n} \left( x \right) - F \left( x \right)\right| > \epsilon \right) \le 2e^{-2n\epsilon ^{2}} = \alpha
@@ -185,23 +246,30 @@ n \hat{F}_{n} \left( x \right) \sim \text{Binom}\left( n, F \left( x \right) \ri
 We can then use our preferred method of constructing a CI for a binomial success probability to get a point-wise CI for \(F \left( x \right)\). We will try to construct an exact Clopper-Pearson CI. Note that this interval will be conservative.
 
 ```{r}
-# This function constructs a pointwise CI for the true CDF at a given value of x. A Clopper-Pearson CI is used.
-get.cdf_pointwise_conf_int_LB = function(n, my_ecdf, x){
+# This function constructs a lower bound for a pointwise CI for the true CDF at a given value of x and then subtracts 0.80 from that for optimization purposes. A Clopper-Pearson CI is used.
+get.cdf_pointwise_conf_int_LB = function(x, n, my_ecdf){
   binom.test(x = floor(n * my_ecdf(x)) + 1,
            n = num_claims,
-           p = 0.8)$conf.int[1]
+           p = 0.8)$conf.int[1] - 0.80
+}
+# This function constructs an upper bound for a pointwise CI for the true CDF at a given value of x and then subtracts 0.80 from that for optimization purposes. A Clopper-Pearson CI is used.
+get.cdf_pointwise_conf_int_UB = function(x, n, my_ecdf){
+  binom.test(x = floor(n * my_ecdf(x)) + 1,
+           n = num_claims,
+           p = 0.8)$conf.int[2] - 0.80
 }
 
-ggplot() +
-  xlim(q80-1,q80+1) + 
-  ylim(0.7,0.925) +
-  stat_function(fun = get.cdf_pointwise_conf_int_LB,
-                args = list(n = num_claims, my_ecdf = total_loss_ecdf))
+# Find quantiles by inverting the LB and UB for the CDF.
+LB = uniroot(get.cdf_pointwise_conf_int_UB, n = num_claims, my_ecdf = total_loss_ecdf, interval = c(3e4,4e4), extendInt = "upX")$root
+
+UB = uniroot(get.cdf_pointwise_conf_int_LB, n = num_claims, my_ecdf = total_loss_ecdf, interval = c(3e4,4e4), extendInt = "upX")$root
 ```
 
+We are 95% confident that the 80th percentile lies between `r dollar(LB)` and `r dollar(UB)`. 
 
-## Benford's Law
-# Reference
+# Fitting a Mixture Distribution
+
+# References
 1. [Adjusted Fisher–Pearson Standardized Moment Coefficient](https://en.wikipedia.org/wiki/Skewness#Sample_skewness)
 
 2. [Excess Kurtosis](https://en.wikipedia.org/wiki/Kurtosis#Excess_kurtosis)
