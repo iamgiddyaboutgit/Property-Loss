@@ -513,3 +513,5 @@ eta_tilde
 5. [Bootstrapping](https://ocw.mit.edu/courses/mathematics/18-05-introduction-to-probability-and-statistics-spring-2014/readings/MIT18_05S14_Reading24.pdf)
 
 6. [Mixture Models](https://stephens999.github.io/fiveMinuteStats/intro_to_mixture_models.html#definition)
+
+7. [Joint Distribution of Order Statistics](https://en.wikipedia.org/wiki/Order_statistic#The_joint_distribution_of_the_order_statistics_of_an_absolutely_continuous_distribution)
