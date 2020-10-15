@@ -27,12 +27,14 @@ library(kableExtra)
 library(scales)
 library(boot)
 library(parallel)
+library(purrr)
 #library(fitdistrplus)
 #library(moments)
 #library(stringr)
 # library(sqldf)
 
-source("CDF_grapher.R")
+source("CDF-grapher.R")
+source("log-likelihood.R")
 ```
 
 ```{r}
@@ -205,13 +207,13 @@ Our point estimate of the `r p`-quantile is `r dollar(p_quantile)`.
 
 Are all of the claims rounded to the nearest dollar?
 
-```{r}
+```{r dollar-test}
 is.integer(total_loss)
 ```
 
 Does there appear to be any kind of rounding in the claims?
 
-```{r}
+```{r 2-digit-rounding}
 # create a function to extract the last n digits from a numeric vector, x.
 bben_tail <- function(x, n){
     sapply(
@@ -245,7 +247,7 @@ last_2_digits_df %>% kable(col.names = c("Last Digit(s) of Total Loss", "Number 
 
 We can see that it is very common for claims to be rounded to the nearest $100. What happens when we admit the last 3 digits into consideration?
 
-```{r}
+```{r 3-digit-rounding}
 # extract the last 3 digits from each claim
 last_3_digits <- sapply(total_loss, bben_tail, n = 3) 
 
@@ -392,7 +394,7 @@ total_loss_ecdf(30050)
 
 # Bootstrapping the p-quantile--a Non-Parametric Approach
 
-```{r}
+```{r Bootstrapping-Non-Parametric}
 # This function takes a vector of numeric sample data and finds the estimate of the p-quantile of the corresponding population according to the method of Ivan Frohne and Rob J Hyndman.
 find_qp = function(data, i, p) {
   quantile(data[i], p, type = 8) # Approximately median-unbiased
@@ -456,6 +458,38 @@ ggplot() +
   xlim(50, length(total_loss[total_loss > 0])) +
   stat_function(fun = eta_k_hill_hat, args = list(x = total_loss[total_loss > 0]))
 ```
+
+```{r}
+generalized_pareto_CDF = function(x, mu, sigma, eta){
+  z = (x-mu)/sigma
+  Re(1 - as.complex(1 + eta * z)^(-1/eta))
+}
+
+generalized_pareto_PDF = function(x, mu, sigma, eta){
+  z = (x-mu)/sigma
+  Re(1 / sigma * as.complex(1 + eta * z)^(-1/(eta + 1)))
+}
+  
+check_CDF(data = total_loss[total_loss > 0], alpha_for_DKW = 0.1, CDF_to_check = generalized_pareto_CDF, mu = 1, sigma = 1e4, eta = 0.7) +
+  ylim(0.5, 1)
+
+check_CDF(data = total_loss[total_loss > 0], alpha_for_DKW = 0.1, CDF_to_check = generalized_pareto_CDF, mu = 1, sigma = 5, eta = 0.7) +
+  ylim(0.5, 1)
+```
+
+
+```{r}
+get_log_likelihood(PDF = generalized_pareto_PDF, data = total_loss[total_loss>0], mu = 1, sigma = 5, eta = 0.7)
+
+generalized_pareto_PDF(x = 1e4, mu = 1, sigma = 1e4, eta = 0.7)
+
+```
+
+
+```{r}
+```
+
+
 Method-of-Moments Estimation of the Parameters in the Generalized Pareto Distribution
 
 ```{r}
@@ -477,3 +511,5 @@ eta_tilde
 ](https://www.win.tue.nl/~rmcastro/AppStat2013/files/lecture1.pdf)
 
 5. [Bootstrapping](https://ocw.mit.edu/courses/mathematics/18-05-introduction-to-probability-and-statistics-spring-2014/readings/MIT18_05S14_Reading24.pdf)
+
+6. [Mixture Models](https://stephens999.github.io/fiveMinuteStats/intro_to_mixture_models.html#definition)
