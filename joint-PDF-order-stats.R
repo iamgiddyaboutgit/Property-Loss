@@ -1,3 +1,4 @@
+library(ggplot2)
 #' Joint PDF of order stats
 #'
 #' Evaluate the joint distribution of two order statistics from a given absolutely continuous distribution. The joint distribution is evaluated at x and y.
@@ -18,7 +19,7 @@
 #' @param k
 #' index of larger order statistic
 #' @param ...
-#' named parameters for the PDF and CDF
+#' the ellipses are used to pass named parameters for the PDF and CDF
 #' @return
 #' numeric 
 #'
@@ -41,16 +42,42 @@ joint_PDF = function(PDF, CDF, x_j, x_k, n, j, k, ...){
     parameters$q = x_k
     CDF_x_k = do.call(PDF, args = parameters[match.arg(names(parameters), choices = formalArgs(PDF), several.ok = TRUE)]) 
     
-    factorial(n)/(factorial(j-1)*factorial(k-j-1)*factorial(n-k))*CDF_x_j^(j-1)*(CDF_x_k - CDF_x_j)^(k - 1 - j) * (1 - CDF_x_k)^(n - k) * PDF_x_j * PDF_x_k
+    # scaling_factor = factorial(n)/(factorial(j-1)*factorial(k-j-1)*factorial(n-k)) # this doesn't work for large n
+    
+    kernel = CDF_x_j^(j-1)*(CDF_x_k - CDF_x_j)^(k - 1 - j) * (1 - CDF_x_k)^(n - k) * PDF_x_j * PDF_x_k
+    
+    kernel
 }
 
-joint_PDF(PDF = dnorm, CDF = pnorm, x_j = seq(-9,11,1), x_k = seq(-8,12,1), n = 3, j = 2, k = 3, mean = 1, sd = 10)
+n = 300
+x_j = seq(-5,5,0.01)
+#x_j = rep(x_j, 100)
+x_k = x_j + 0.001
+j = 20
+k = 21
+z = joint_PDF(PDF = dt, CDF = pt, x_j = x_j, x_k = x_k, n = 300, j = 20, k = 21, df = 2)
 
+data = data.frame(x_j,x_k,z)
 
-# Inequality
-all_less_than_equals = function(a, b){
-    sum(a <= b) == length(a)
+# Note that this bivariate PDF looks very narrow because the order statistics are highly correlated. At first I thought this was a mistake in generating the x and y-coordinates, but I now believe that this is happening just because of the high correlation.
+ggplot(data = data,
+       aes(x = x_j,
+           y = x_k,
+           z = z)) +
+    geom_density_2d()
+
+plot_ly(data = data,
+        x = ~x_j,
+        y = ~x_k,
+        z = ~log(z),
+        type = "contour")  
+
+sim1 = 1e+5
+estimates = matrix(nrow = sim1, ncol = 2, dimnames = list(NULL, c("x_j", "x_k")))
+for(i in 1:sim1){
+    rand_data = sort(rt(n = n, df = 2), decreasing = FALSE)
+    estimates[i, "x_j"] = rand_data[j]
+    estimates[i, "x_k"] = rand_data[k]
 }
-x_j = c(1, 3, 9, 5)
-x_k = c(2, 4, 10)
-all_less_than_equals(x_j, x_k) 
+colMeans(estimates)
+
