@@ -18,13 +18,15 @@ check_CDF = function(data, alpha_for_DKW, CDF_to_check=NULL, ...){
     p = ggplot() +
         xlim(min(data),max(data)) + 
         ylim(0,1) +
-        geom_function(
+        stat_function(
             aes(color = "DKW Band"),
-            fun = DKW_lb
+            fun = DKW_lb,
+            geom = "step"
         ) +
-        geom_function(
+        stat_function(
             aes(color = "DKW Band"),
-            fun = DKW_ub
+            fun = DKW_ub,
+            geom = "step"
         ) +
         stat_function(
             aes(color = "ECDF"),

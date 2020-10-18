@@ -34,16 +34,17 @@ library(purrr)
 # library(sqldf)
 
 source("CDF-grapher.R")
+source("clopper-pearson-CI.R")
 source("log-likelihood.R")
 ```
 
 ```{r}
 # Constants
-p = 0.80 # Our goal is a confidence interval for the p-quantile.
+p = 0.8 # Our goal is a confidence interval for the p-quantile.
 ```
 
 # Data Exploration
-Our data consists of insurance claims made after fire damage. We will assume that our data comprises an independent and identically distributed random sample of daily fire insurance claims.
+Our data consists of day-over-day insurance claims made after fire damage. We will assume that our data comprises an independent and identically distributed random sample.
 
 
 ```{r}
@@ -63,47 +64,47 @@ prop_loss_grouped = prop_loss %>%
   summarize(total_loss = sum(Total.Loss), .groups = "keep") 
 ```
 
-Our data consists of the total loss claimed by day from `r min(prop_loss$Date)` to `r max(prop_loss$Date)`.  
+Our data consists of the total loss claimed by day from `r min(prop_loss$Date)` to `r max(prop_loss$Date)` (`r round(interval(min(prop_loss$Date), max(prop_loss$Date)) / years(1), 2)` years).
 
-Let's look at some summary statistics of the claims.
+Let's look at some summary statistics of the total daily loss.
 
 ```{r}
 # We use the population quantile estimator recommended by Hyndman and Fan (1996).
 summary(total_loss, quantile.type = 8) 
 ```
 
-Notice that the range of the claims is in the millions. 
-Let's naively try making a histogram of the total loss claimed.
+Notice that the range of the total daily loss is in the millions. 
+Let's naively try making a histogram.
 
 ```{r}
-hist(total_loss, main = "Total Loss", xlab = "")
+hist(total_loss, main = "Total Daily Loss", xlab = "Total Daily Loss")
 ```
 
-The claims look extremely right-skewed. How many claims were there for $0?
+The total daily loss looks extremely right-skewed. How often did we have a total daily loss of $0?
 
 ```{r}
-num_claims = length(total_loss)
+num_days = length(total_loss)
 num_zero_days = length(total_loss[total_loss == 0])
-proportion_zero_days =  num_zero_days/num_claims
+proportion_zero_days =  num_zero_days/num_days
 ```
 
 There were `r num_zero_days` days with zero claims. This is `r round(proportion_zero_days * 100, 2)`% of the days.
 
-Let's look at the sum of claims per month.
+Let's look at the sum of total daily loss per month.
 
 ```{r}
 ggplot(data = prop_loss_grouped,
        aes(x = total_loss)) +
   geom_histogram(aes(y = ..density..), bins = 25, color = "black") +
   geom_density(aes(y = ..density..)) +
-  labs(title = "Distribution of the Sum of Claims per Month", 
-       x = "Sum of Claims per Month (USD)",
+  labs(title = "Distribution of the Total Daily Loss per Month", 
+       x = "Total Daily Loss per Month (USD)",
        y = "Density") +
   theme(axis.text.y = element_blank(), 
         axis.ticks.y = element_blank())
 ```
 
-Do some months have more days where no claims are made than other months?
+Do some months have more days with non-zero claims than other months?
 
 ```{r}
 prop_loss_grouped_2 = prop_loss %>%
@@ -128,8 +129,9 @@ ggplot(data = prop_loss_grouped_2,
     theme(axis.title.x = element_blank())
 ```
 
-It appears that the proportion of non_zero_days is not the same for each month.
-Let's test the null hypothesis that the proportion of non_zero_days is the same for each month in the timespan that the data was collected vs. the alternative that the proportions are not all the same.
+It appears that the proportion of non-zero claim days differs from month to month.
+
+Let's test the null hypothesis that the proportion of non-zero claim days is the same for each month in the timespan that the data was collected vs. the alternative that the proportions are not all the same.
 
 ```{r}
 prop.test(x = prop_loss_grouped_2$num_non_zero_days, n = prop_loss_grouped_2$total_days)
@@ -137,7 +139,7 @@ prop.test(x = prop_loss_grouped_2$num_non_zero_days, n = prop_loss_grouped_2$tot
 
 It appears likely at the 5% significance level that the proportion of non-zero claim days is not the same per month. In other words, there is an association between month and fire risk.
 
-For the purposes of the present analysis, we will only try to estimate the p-quantile of daily claims without reference to the month. In future studies, a hierarchical model could perhaps be built that looks at the number of claims that occur per month and uses that information to estimate a p-quantile of daily claims on a month-by-month basis.
+For the purposes of the present analysis, we will only try to estimate the p-quantile of total daily loss without reference to the month. In future studies, a hierarchical model could perhaps be built that looks at the number of claims that occur per month and uses that information to estimate a p-quantile on a month-by-month basis. Future studies could perhaps make use of quantile regression.
 
 ## Skewness
 
@@ -149,7 +151,7 @@ G_{1} = \frac{\sqrt{n\left(n-1\right)}}{n-2} \cdot \frac{\frac{1}{n}\sum_{i=1}^{
 
 ```{r}
 mean_claim = mean(total_loss)
-sqrt(num_claims*(num_claims - 1))/(num_claims-2)*(1/num_claims*sum((total_loss - mean_claim)^3))/(1/num_claims*sum((total_loss - mean_claim)^2))^(3/2)
+sqrt(num_days*(num_days - 1))/(num_days-2)*(1/num_days*sum((total_loss - mean_claim)^3))/(1/num_days*sum((total_loss - mean_claim)^2))^(3/2)
 ```
 
 For comparison, a symmetric distribution would have a skewness of 0. An exponential distribution would have a skewness of 2.
@@ -171,12 +173,12 @@ G_{2} =
 \]
 
 ```{r}
-((num_claims + 1) * (num_claims) * (num_claims - 1)) /
-((num_claims - 2) * (num_claims - 3)) *
+((num_days + 1) * (num_days) * (num_days - 1)) /
+((num_days - 2) * (num_days - 3)) *
 sum((total_loss - mean_claim)^4) /
 (sum((total_loss - mean_claim)^2))^2 - 3 *
-((num_claims - 1)^2) /
-((num_claims - 2) * (num_claims - 3))
+((num_days - 1)^2) /
+((num_days - 2) * (num_days - 3))
 ```
 
 This high positive value for the excess kurtosis indicates that our distribution has heavy tails. This is often the case for non-life insurance claims.
@@ -188,7 +190,7 @@ total_loss_ecdf = ecdf(total_loss)
 plot(total_loss_ecdf, main = "Empirical Cumulative Distribution Function\n of Total Loss")
 ```
 
-We can zoom in around the p-quantile.
+We can zoom in around the `r p`-quantile.
 
 ```{r}
 # This finds the p-quantile of our sample data.
@@ -201,17 +203,17 @@ plot(total_loss_ecdf, main = "Empirical Cumulative Distribution Function\n of To
 abline(h = p, v = p_quantile, col = "red")
 ```
 
-Our point estimate of the `r p`-quantile is `r dollar(p_quantile)`.
+**Our point estimate of the `r p`-quantile is `r dollar(p_quantile)`.**
 
-## Are Claims Continuous or Discrete?
+## Is Total Daily Loss Continuous or Discrete?
 
-Are all of the claims rounded to the nearest dollar?
+Is the total daily loss rounded to the nearest dollar?
 
 ```{r dollar-test}
 is.integer(total_loss)
 ```
 
-Does there appear to be any kind of rounding in the claims?
+Is the total daily loss rounded?
 
 ```{r 2-digit-rounding}
 # create a function to extract the last n digits from a numeric vector, x.
@@ -229,7 +231,7 @@ bben_tail <- function(x, n){
     )
 }
 
-# Extract the last 2 digits (if possible) from each claim.
+# Extract the last 2 digits (if possible) from each total loss.
 last_2_digits <- sapply(total_loss, bben_tail, n = 2) 
 
 last_2_digits_tally = c(sum(last_2_digits == "0"),
@@ -239,16 +241,16 @@ last_2_digits_tally = c(sum(last_2_digits == "0"),
 
 last_2_digits_df = data.frame(last_2 = c("0", "00", "other"),
                               count = last_2_digits_tally,
-                              prop = round(last_2_digits_tally/num_claims, 4)
+                              prop = round(last_2_digits_tally/num_days, 4)
 )
 
-last_2_digits_df %>% kable(col.names = c("Last Digit(s) of Total Loss", "Number of Claims", "Proportion")) %>% kable_styling(full_width = FALSE)
+last_2_digits_df %>% kable(col.names = c("Last Digit(s) of Total Loss", "Number of Days", "Proportion")) %>% kable_styling(full_width = FALSE)
 ```
 
-We can see that it is very common for claims to be rounded to the nearest $100. What happens when we admit the last 3 digits into consideration?
+We can see that it is very common for the total daily loss to be rounded to the nearest $100. What happens when we admit the last 3 digits into consideration?
 
 ```{r 3-digit-rounding}
-# extract the last 3 digits from each claim
+# Extract the last 3 digits from each total daily loss
 last_3_digits <- sapply(total_loss, bben_tail, n = 3) 
 
 last_3_digits_tally = c(sum(last_3_digits == "0"),
@@ -260,17 +262,17 @@ last_3_digits_tally = c(sum(last_3_digits == "0"),
 
 last_3_digits_df = data.frame(last_3 = c("0", "00", "000", "500", "other"),
                               count = last_3_digits_tally,
-                              proportion = round(last_3_digits_tally/num_claims, 4)
+                              proportion = round(last_3_digits_tally/num_days, 4)
 )
 
-last_3_digits_df %>% kable(col.names = c("Last Digit(s) of Total Loss", "Number of Claims", "Proportion")) %>% kable_styling(full_width = FALSE)
+last_3_digits_df %>% kable(col.names = c("Last Digit(s) of Total Loss", "Number of Days", "Proportion")) %>% kable_styling(full_width = FALSE)
 ```
 
-Now we see that the only claims that were rounded to the nearest $100 were those of more than $1000. This makes sense. For larger claims, it is difficult to give an estimate of the exact loss. Despite this discrete nature of the claims, we will assume that they are continuous for simplicity.
+Now we see that many total losses are in units of 500 or 1000 USD. **For simplicity, we will ignore the possibly discrete nature of the total daily loss.**
 
 # Quantile Estimation Using the Empirical CDF
 
-The Dvoretzky–Kiefer–Wolfowitz Inequality^[[3]](https://en.wikipedia.org/wiki/Dvoretzky%E2%80%93Kiefer%E2%80%93Wolfowitz_inequality)^ allows for the construction of simultaneous confidence bands around the Emperical CDF. The inequality is non-parametric so it is not necessary to first fit a distribution to the claims. We will choose \(\alpha = 0.05\). The inequality states:
+The Dvoretzky–Kiefer–Wolfowitz Inequality^[[3]](https://en.wikipedia.org/wiki/Dvoretzky%E2%80%93Kiefer%E2%80%93Wolfowitz_inequality)^ allows for the construction of simultaneous confidence bands around the Emperical CDF. The inequality is non-parametric so it is not necessary to first fit a distribution to the total daily loss. We will choose \(\alpha = 0.05\). The inequality states:
 
 \[
 P\left(\sup_{x \in \mathbb{R}} \left| F_{n} \left( x \right) - F \left( x \right)\right| > \epsilon \right) \le 2e^{-2n\epsilon ^{2}} = \alpha
@@ -285,7 +287,7 @@ F_{n} \left(x \right) - \epsilon \leq F \left(x \right)
 
 ```{r}
 alpha = 0.05
-epsilon = sqrt(log(2/alpha)/(2*num_claims))
+epsilon = sqrt(log(2/alpha)/(2*num_days))
 ```
 
 For our problem, \(\epsilon =\) `r round(epsilon, 4)`. 
@@ -295,9 +297,9 @@ For our problem, \(\epsilon =\) `r round(epsilon, 4)`.
 check_CDF(data = total_loss, alpha_for_DKW = 0.05) +
   xlim(2e4,6e4) + 
   ylim(0.7,0.925) +
-  geom_hline(linetype = 2, yintercept = p, col = "blue") +
-  geom_segment(aes(x = 36000, y = p, xend = 36000, yend = -Inf), linetype = 2, col = "blue") +
-  geom_segment(aes(x = 28000, y = p, xend = 28000, yend = -Inf), linetype = 2, col = "blue") +
+  geom_segment(aes(x = -Inf, y = p, xend = 31500, yend = p), linetype = 2, col = "blue") +
+  # geom_segment(aes(x = 36000, y = p, xend = 36000, yend = -Inf), linetype = 2, col = "blue") +
+  # geom_segment(aes(x = 28000, y = p, xend = 28000, yend = -Inf), linetype = 2, col = "blue") +
   geom_segment(aes(x = 31500, y = 0.78, xend = 31500, yend = 0.822), linetype = 2, col = "green") +
   geom_segment(aes(x = 31500, y = 0.822, xend = 36500, yend = 0.822), linetype = 2, col = "green") +
   geom_segment(aes(x = 28500, y = 0.78, xend = 31500, yend = 0.78), linetype = 2, col = "green") +
@@ -314,7 +316,7 @@ check_CDF(data = total_loss, alpha_for_DKW = 0.05) +
 One weakness of the Dvoretzky–Kiefer–Wolfowitz bands is that their coverage probability is lower near the median of the distribution while higher near the tails. However, these bands very easily capture where the true CDF may lie.
 
 ### Obtaining a Pointwise Confidence Interval Using the Empirical CDF
-From the convergence of the Empirical CDF, [[4]](https://www.win.tue.nl/~rmcastro/AppStat2013/files/lecture1.pdf) explains that
+From the convergence of the Empirical CDF, [[4]](https://www.win.tue.nl/~rmcastro/AppStat2013/files/lecture1.pdf), it has been shown that
 
 \[
 n \hat{F}_{n} \left( x \right) \sim \text{Binom}\left( n, F \left( x \right) \right)
@@ -322,75 +324,19 @@ n \hat{F}_{n} \left( x \right) \sim \text{Binom}\left( n, F \left( x \right) \ri
 
 We can then use our preferred method of constructing a CI for a binomial success probability to get a point-wise CI for \(F \left( x \right)\). Note that our point-estimate for the true CDF in these intervals will be the Empirical CDF. We will try to construct an exact Clopper-Pearson CI because it is conservative.
 
+Note that the Hyndman and Fan (1996) type 8 estimate of the p-quantile used two order statistics. Therefore, our point-estimate of the p-quantile corresponds to not one, but two order statistics. There is thus no obvious way to map our estimate back to a single order statistic. We choose the larger of the two order statistics to give an upward bias to our confidence interval. We feel that it is a greater cause for concern if the actual p-quantile is above the upper bound than if it is below the lower bound.
+
 ```{r}
-# This function constructs a lower bound for a pointwise CI for the true CDF at a given value of x and then subtracts p from that for optimization purposes. A Clopper-Pearson CI is used.
-get.cdf_pointwise_conf_int_LB = function(x, n, my_ecdf){
-  binom.test(x = floor(n * my_ecdf(x)) + 1,
-           n = num_claims,
-           p = p)$conf.int[1] - p
-}
-# This function constructs an upper bound for a pointwise CI for the true CDF at a given value of x and then subtracts p from that for optimization purposes. A Clopper-Pearson CI is used.
-get.cdf_pointwise_conf_int_UB = function(x, n, my_ecdf){
-  binom.test(x = floor(n * my_ecdf(x)) + 1,
-           n = num_claims,
-           p = p)$conf.int[2] - p
-}
-# Find the lower and upper bounds for the p-quantile by inverting the UB and LB of the CDF.
-LB = uniroot(get.cdf_pointwise_conf_int_UB, n = num_claims, my_ecdf = total_loss_ecdf, interval = c(2e4,4e4), extendInt = "upX")
+k = floor(num_days*p + (p + 1)/3) + 1 # k is the index for the larger order stat
 
-# The above might not actually satisfy the definition of a quantile so let's fix that.
-if(LB$f.root >= 0){
-  LB = LB$root
-} else{
-  LB = min(total_loss[which(round(LB$root, 2) == total_loss) + 1])
-}
+# Get the upper and lower bounds on the true CDF corresponding to k.
+CDF_bounds = get_clopper_pearson(x = k, n = num_days, alpha = 0.05)
 
-UB = uniroot(get.cdf_pointwise_conf_int_LB, n = num_claims, my_ecdf = total_loss_ecdf, interval = c(2e4,4e4), extendInt = "upX")$root
-
+# Transform the bounds obtained above into quantiles of daily total loss using the Hyndman and Fan (1996) type 8 quantile estimator.
+CI = quantile(x = total_loss, probs = CDF_bounds, type = 8)
 ```
 
-We are 95% confident that the `r p`-quantile lies between `r dollar(LB)` and `r dollar(UB)`. 
-
-## More practice with quantiles
-
-```{r eval=FALSE, include=FALSE}
-n = 6
-dataset = sample.int(9, size = n, replace = TRUE) # get a set of random integers between 1 and 9, inclusive
-dataset = sort(dataset)
-
-test_if_x_is_kth_q_quantile = function(x, dataset, k, q){
-  n = length(dataset)
-  if(sum(dataset < x)/n <= k/q
-     &
-     sum(dataset <= x)/n >= k/q){
-    
-    return(TRUE)
-  } else{
-       return(FALSE)
-     }
-}
-# 3-quantiles
-q = 3
-  # 1st 3-quantile
-  k = 1
-  test_if_x_is_kth_q_quantile(x = 3, dataset, k = k, q = q)
-  # 2nd 3-quantile
-  k = 2
-  test_if_x_is_kth_q_quantile(x = 8, dataset, k = k, q = q)
-
-# for our data
-test_if_x_is_kth_q_quantile(x = p_quantile, dataset = total_loss, k = 80, q = 100)
-sum(total_loss < 31400)/num_claims
-sum(total_loss <= 31400)/num_claims
-
-
-total_loss[ceiling(num_claims * p)]
-
-plot(ecdf(c(3,6,7,8,8,10,13,15,16,20)))
-
-floor(n * my_ecdf(x)) + 1
-total_loss_ecdf(30050)
-```
+**We are 95% confident that the `r p`-quantile lies between `r dollar(unname(CI[1]))` and `r dollar(unname(CI[2]))`.** 
 
 # Bootstrapping the p-quantile--a Non-Parametric Approach
 

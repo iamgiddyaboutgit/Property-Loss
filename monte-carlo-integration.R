@@ -2,7 +2,6 @@ f = function(x,y){
     x*y*(0.75*(x^2+y^2)+0.5)
 }
 
-integrate(f, lower = 0, upper = 1)
 
 V = 1 # change as necessary
 m = 2 # f is m-dimensional
