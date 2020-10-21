@@ -376,42 +376,54 @@ generalized_pareto_PDF = function(x, mu, sigma, xi){
   z = (x-mu)/sigma
   Re(1 / sigma * as.complex(1 + xi * z)^(-1/(xi + 1)))
 }
+```
 
-# lucky guess? 
-check_CDF(data = total_loss, alpha_for_DKW = 0.1, CDF_to_check = generalized_pareto_CDF, mu = -1e4, sigma = 1.7e4, xi = 0.49) +
+### Method-of-Moments Estimation of the Parameters in the Generalized Pareto Distribution
+
+```{r}
+mu_tilde = 0 # I picked this value without using Method-of-Moments
+xi_tilde = 0.5 * (1 - (mean(total_loss) - mu_tilde)^2/var(total_loss))
+xi_tilde
+
+sigma_tilde = (mean(total_loss) - mu_tilde) * (1 - xi_tilde)
+sigma_tilde
+
+check_CDF(data = total_loss, alpha_for_DKW = 0.05, CDF_to_check = generalized_pareto_CDF, mu = mu_tilde, sigma = sigma_tilde, xi = xi_tilde) +
   xlim(0,1e5) +
   ylim(0.5, 1)
 ```
 
+Is the log-likelihood stable at these method-of-moments estimates?
 
 ```{r}
-get_log_likelihood(PDF = generalized_pareto_PDF, data = total_loss, mu = 0, sigma = 1e4, xi = 0.7)
-# -41935.12
-# Check above for stability
-mu_hat = -1e4
-sigma_hat = 1.7e4
-xi_hat = 0.49
-get_log_likelihood(PDF = generalized_pareto_PDF, data = total_loss, mu = mu_hat, sigma = sigma_hat, xi = xi_hat)
+get_log_likelihood_for_gp_for_optim = function(params){
+  get_log_likelihood(PDF = generalized_pareto_PDF, # taken from global env.
+                   data = total_loss, # taken from global env.
+                   mu = mu_tilde, # taken from global env.
+                   sigma = params["sigma_hat"], 
+                   xi = params["xi_hat"]
+  )
+}
+# params = c(sigma_tilde = 1e4, xi_tilde = 0.7)
+# get_log_likelihood(PDF = generalized_pareto_PDF, 
+#                    data = total_loss, 
+#                    mu = mu_tilde, 
+#                    sigma = params["sigma_tilde"], 
+#                    xi = params["xi_tilde"]
+#   )
+
+optim(par = c(sigma_hat = sigma_tilde, xi_hat = xi_tilde), 
+      fn = get_log_likelihood_for_gp_for_optim,
+      method = "L-BFGS-B",
+      lower = c(10, 0),
+      upper = c(5e6, 5e6),
+      control = list(parscale = c(1,1e-4),
+                     fnscale = -1)) # turn it into a maximization problem
 
 
-check_CDF(data = total_loss, alpha_for_DKW = 0.05, CDF_to_check = generalized_pareto_CDF, mu = mu_hat, sigma = sigma_hat, xi = xi_hat) 
 ```
 
-Method-of-Moments Estimation of the Parameters in the Generalized Pareto Distribution
 
-```{r}
-mu_tilde = 0
-xi_tilde = 0.5 * (1 - (mean(total_loss[total_loss > 0]) - mu_tilde)^2/var(total_loss[total_loss > 0]))
-xi_tilde
-
-sigma_tilde = (mean(total_loss[total_loss > 0]) - mu_tilde) * (1 - xi_tilde)
-sigma_tilde
-
-get_log_likelihood(PDF = generalized_pareto_PDF, data = total_loss[total_loss > 0], mu = mu_tilde, sigma = sigma_tilde, xi = xi_tilde)
-
-
-check_CDF(data = total_loss, alpha_for_DKW = 0.05, CDF_to_check = generalized_pareto_CDF, mu = mu_hat, sigma = sigma_hat, xi = xi_hat) 
-```
 
 ## Skewed Generalized t Distribution
 
