@@ -37,6 +37,7 @@ source("CDF-grapher.R")
 source("clopper-pearson-CI.R")
 source("log-likelihood.R")
 source("mixture-distribution.R")
+source("generalized-pareto.R")
 ```
 
 ```{r}
@@ -107,7 +108,7 @@ ggplot(data = prop_loss_grouped,
 
 Do some months have more days with non-zero claims than other months?
 
-```{r echo = FALSE}
+```{r month-comparison echo = FALSE}
 prop_loss_grouped_2 = prop_loss %>%
   group_by(month) %>%
   summarize(total_days = n(), 
@@ -350,102 +351,123 @@ R = 1e4
 cpus_on_machine = detectCores()
 bootstrap_results_1 = boot(data = total_loss, statistic = find_qp, p = p, R = R, sim = "ordinary", parallel = "snow", ncpus = cpus_on_machine)
 
-hist(bootstrap_results_1$t[,1], xlim = c(2.8e4, 3.6e4), nclass = 30, xlab = paste0(p, "-Quantile of Resampled Total Loss"), main = paste0("Bootstrap Estimate of ", p, "-Quantile of Total Loss\n R = ", R))
+alpha = 0.05
+CI_nonparametric = quantile(bootstrap_results_1$t[,1], p = c(alpha/2, 1-alpha/2), type = 8)
+dollar(CI_nonparametric)
 
-CI_nonparametric = c(quantile(bootstrap_results_1$t[,1], p = 0.025, type = 8),
-       quantile(bootstrap_results_1$t[,1], p = 0.975, type = 8))
-CI_nonparametric
+hist(bootstrap_results_1$t[,1], xlim = c(2.8e4, 3.6e4), nclass = 30, xlab = paste0(p, "-Quantile of Resampled Total Loss"), main = paste0("Bootstrap Estimate of ", p, "-Quantile of Total Loss\nR = ", R))
+abline(v = CI_nonparametric[1], col = "red")
+abline(v = CI_nonparametric[2], col = "red")
 ```
 
 This compares favorably with the CI obtained using the Empirical CDF.
 
-# Fitting a Mixture Distribution
+# Fitting a Distribution
 
-## Pareto Distribution to non-zero data
-
-```{r}
-x_m_hat = min(total_loss[total_loss != 0])
-n = length(total_loss[total_loss != 0])
-alpha_hat = n/sum(log(total_loss[total_loss != 0]/x_m_hat))
-
-pareto_CDF = function(x, x_m, alpha){
-  1 - (x_m/x)^alpha
-}
-
-check_CDF(data = total_loss[total_loss > 0], alpha_for_DKW = 0.1, CDF_to_check = pareto_CDF, x_m = x_m_hat, alpha = alpha_hat)
-```
-
+## Generalized Pareto
 
 ```{r}
-# This function finds the Hill estimator for a vector of numeric data, x, using some optimal k (user supplied).
-eta_k_hill_hat = function(x, k){
-  if(min(k) < 2 | max(k) > length(x)){
-    stop("2 <= k <= n")
-  }
-  x = sort(x, decreasing = FALSE)
-  n = length(x)
-  
-  # Make a vector to store the results.
-  eta_k_hill_hat_vec = vector(mode = "double", length = length(k))
-  
-  for(i in 1:length(k)){
-    eta_k_hill_hat_vec[i] = 1/(k[i]-1)*sum(log(x[1:(k[i]-1)]/x[k[i]]))
-  }
-
-  return(eta_k_hill_hat_vec)
-}
-
-eta_k_hill_hat(x = total_loss[total_loss > 0], k = 3380)
-                                        
-
-
-plot(x = 2:length(total_loss[total_loss > 0]), y = eta_k_hill_hat(x = total_loss[total_loss > 0], k = 2:length(total_loss[total_loss > 0])), type = "l")
-
-ggplot() +
-  xlim(50, length(total_loss[total_loss > 0])) +
-  stat_function(fun = eta_k_hill_hat, args = list(x = total_loss[total_loss > 0]))
-```
-
-```{r}
-generalized_pareto_CDF = function(x, mu, sigma, eta){
+generalized_pareto_CDF = function(x, mu, sigma, xi){
   z = (x-mu)/sigma
-  Re(1 - as.complex(1 + eta * z)^(-1/eta))
+  Re(1 - as.complex(1 + xi * z)^(-1/xi))
 }
 
-generalized_pareto_PDF = function(x, mu, sigma, eta){
+generalized_pareto_PDF = function(x, mu, sigma, xi){
   z = (x-mu)/sigma
-  Re(1 / sigma * as.complex(1 + eta * z)^(-1/(eta + 1)))
+  Re(1 / sigma * as.complex(1 + xi * z)^(-1/(xi + 1)))
 }
-  
-check_CDF(data = total_loss[total_loss > 0], alpha_for_DKW = 0.1, CDF_to_check = generalized_pareto_CDF, mu = 1, sigma = 1e4, eta = 0.7) +
-  ylim(0.5, 1)
 
-check_CDF(data = total_loss[total_loss > 0], alpha_for_DKW = 0.1, CDF_to_check = generalized_pareto_CDF, mu = 1, sigma = 5, eta = 0.7) +
+# lucky guess? 
+check_CDF(data = total_loss, alpha_for_DKW = 0.1, CDF_to_check = generalized_pareto_CDF, mu = -1e4, sigma = 1.7e4, xi = 0.49) +
+  xlim(0,1e5) +
   ylim(0.5, 1)
 ```
 
 
 ```{r}
-get_log_likelihood(PDF = generalized_pareto_PDF, data = total_loss[total_loss>0], mu = 1, sigma = 5, eta = c(0.6,0.7))
+get_log_likelihood(PDF = generalized_pareto_PDF, data = total_loss, mu = 0, sigma = 1e4, xi = 0.7)
+# -41935.12
+# Check above for stability
+mu_hat = -1e4
+sigma_hat = 1.7e4
+xi_hat = 0.49
+get_log_likelihood(PDF = generalized_pareto_PDF, data = total_loss, mu = mu_hat, sigma = sigma_hat, xi = xi_hat)
 
-generalized_pareto_PDF(x = 1e4, mu = 1, sigma = 1e4, eta = 0.7)
 
+check_CDF(data = total_loss, alpha_for_DKW = 0.05, CDF_to_check = generalized_pareto_CDF, mu = mu_hat, sigma = sigma_hat, xi = xi_hat) 
 ```
-
-
-```{r}
-```
-
 
 Method-of-Moments Estimation of the Parameters in the Generalized Pareto Distribution
 
 ```{r}
-eta_tilde = 0.5 * (1 - (mean(total_loss[total_loss > 0]) - 1e3)^2/var(total_loss[total_loss > 0]))
-eta_tilde
+mu_tilde = 0
+xi_tilde = 0.5 * (1 - (mean(total_loss[total_loss > 0]) - mu_tilde)^2/var(total_loss[total_loss > 0]))
+xi_tilde
+
+sigma_tilde = (mean(total_loss[total_loss > 0]) - mu_tilde) * (1 - xi_tilde)
+sigma_tilde
+
+get_log_likelihood(PDF = generalized_pareto_PDF, data = total_loss[total_loss > 0], mu = mu_tilde, sigma = sigma_tilde, xi = xi_tilde)
+
+
+check_CDF(data = total_loss, alpha_for_DKW = 0.05, CDF_to_check = generalized_pareto_CDF, mu = mu_hat, sigma = sigma_hat, xi = xi_hat) 
 ```
 
+## Skewed Generalized t Distribution
 
-## Skew-Student
+# Fitting a Mixture Distribution
+
+# Select the best parametric model
+
+```{r}
+get_AIC = function(model_names = NULL, k, max_log_likelihood){
+  AIC_comparison = 2*k - 2 * max_log_likelihood
+  names(AIC_comparison) = model_names
+  AIC_comparison # lower is better
+}
+
+get_AIC(k = c(3, 3), max_log_likelihood = c(-20918.16, -20342.89))
+```
+
+# Bootstrapping the p-Quantile--A Parametric Approach
+
+```{r}
+# Reduce the number of replications to speed up computation time.
+R = 1e4
+# This calculates the bootstrap difference between the estimated p-quantile from a bootstrap sample of the fitted distribution and the point-estimate of the p-quantile from the original data. 
+delta_star = function(data, i, p, theta_hat){
+  quantile(data[i], p, type = 8, names = FALSE) - unname(theta_hat)
+}
+
+bootstrap_results_2 = boot(
+  data = rgp(n = num_days, mu = 0, sigma = 1e4, xi = 0.7), 
+  statistic = delta_star, 
+  p = p, 
+  theta_hat = p_quantile,
+  R = R, 
+  sim = "ordinary", 
+  parallel = "snow", 
+  ncpus = cpus_on_machine
+)
+
+
+alpha = 0.05
+CI_nonparametric = quantile(bootstrap_results_1$t[,1], p = c(alpha/2, 1-alpha/2), type = 8)
+dollar(CI_nonparametric)
+
+quantiles_of_delta_star = quantile(bootstrap_results_2$t[,1], p = c(alpha/2, 1-alpha/2), type = 8)
+CI_parametric = c(p_quantile - quantiles_of_delta_star[2],
+                  p_quantile - quantiles_of_delta_star[1])
+names(CI_parametric) = c(paste0((alpha/2) * 100, "%"),
+                         paste0((1 - alpha/2) * 100, "%")
+)
+CI_parametric
+
+hist(bootstrap_results_2$t[,1] + p_quantile, nclass = 30, xlab = "Bootstrap Error from Point-Estimate", main = paste0("Bootstrap Estimate of ", p, "-Quantile of Total Loss\nR = ", R))
+abline(v = CI_parametric[1], col = "red")
+abline(v = CI_parametric[2], col = "red")
+```
+
 
 # References
 1. [Adjusted Fisher–Pearson Standardized Moment Coefficient](https://en.wikipedia.org/wiki/Skewness#Sample_skewness)
