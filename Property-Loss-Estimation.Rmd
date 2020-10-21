@@ -1,5 +1,5 @@
 ---
-title: "Property Loss Estimation"
+title: "Estimating a High Quantile for Insurance Claims"
 author: "Justin Patterson"
 header-includes:
    - \usepackage{amssymb}
@@ -20,27 +20,22 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 ```{r}
 library(ggplot2)
 library(lubridate)
-# library(ggfortify)
-# library(VGAM)
 library(dplyr)
 library(kableExtra)
 library(scales)
 library(boot)
 library(parallel)
 library(purrr)
-#library(fitdistrplus)
-#library(moments)
-#library(stringr)
-# library(sqldf)
+
 
 source("CDF-grapher.R")
 source("clopper-pearson-CI.R")
 source("log-likelihood.R")
 source("mixture-distribution.R")
 source("generalized-pareto.R")
-```
 
-```{r}
+set.seed(123)
+
 # Constants
 p = 0.8 # Our goal is a confidence interval for the p-quantile.
 ```
@@ -108,7 +103,7 @@ ggplot(data = prop_loss_grouped,
 
 Do some months have more days with non-zero claims than other months?
 
-```{r month-comparison echo = FALSE}
+```{r month-comparison, echo = FALSE}
 prop_loss_grouped_2 = prop_loss %>%
   group_by(month) %>%
   summarize(total_days = n(), 
@@ -185,28 +180,6 @@ sum((total_loss - mean_claim)^4) /
 
 This high positive value for the excess kurtosis indicates that our distribution has heavy tails. This is often the case for non-life insurance claims.
 
-## Empirical CDF
-
-```{r}
-total_loss_ecdf = ecdf(total_loss)
-plot(total_loss_ecdf, main = "Empirical Cumulative Distribution Function\n of Total Loss")
-```
-
-We can zoom in around the `r p`-quantile.
-
-```{r}
-# This finds the p-quantile of our sample data.
-p_quantile = quantile(total_loss_ecdf, probs = p, type = 8) # We use the population quantile estimator recommended by Hyndman and Fan (1996).
-
-plot(total_loss_ecdf, main = "Empirical Cumulative Distribution Function\n of Total Loss", xlim = c(2e4,6e4), ylim = c(0.7, 0.9))
-abline(h = p, v = p_quantile, col = "red")
-
-plot(total_loss_ecdf, main = "Empirical Cumulative Distribution Function\n of Total Loss", xlim = c(3.1e4,3.2e4), ylim = c(0.798, 0.802))
-abline(h = p, v = p_quantile, col = "red")
-```
-
-**Our point estimate of the `r p`-quantile is `r dollar(p_quantile)`.**
-
 ## Is Total Daily Loss Continuous or Discrete?
 
 Is the total daily loss rounded to the nearest dollar?
@@ -272,6 +245,28 @@ last_3_digits_df %>% kable(col.names = c("Last Digit(s) of Total Loss", "Number 
 
 Now we see that many total losses are in units of 500 or 1000 USD. **For simplicity, we will ignore the possibly discrete nature of the total daily loss.**
 
+## Empirical CDF
+
+```{r}
+total_loss_ecdf = ecdf(total_loss)
+plot(total_loss_ecdf, main = "Empirical Cumulative Distribution Function\n of Total Daily Loss")
+```
+
+We can zoom in around the `r p`-quantile.
+
+```{r}
+# This finds the p-quantile of our sample data.
+p_quantile = quantile(total_loss_ecdf, probs = p, type = 8) # We use the population quantile estimator recommended by Hyndman and Fan (1996).
+
+plot(total_loss_ecdf, main = "Empirical Cumulative Distribution Function\n of Total Loss", xlim = c(2e4,6e4), ylim = c(0.7, 0.9))
+abline(h = p, v = p_quantile, col = "red")
+
+plot(total_loss_ecdf, main = "Empirical Cumulative Distribution Function\n of Total Daily Loss", xlim = c(3.1e4,3.2e4), ylim = c(0.798, 0.802))
+abline(h = p, v = p_quantile, col = "red")
+```
+
+**Our point estimate of the `r p`-quantile is `r dollar(p_quantile)`.**
+
 # Quantile Estimation Using the Empirical CDF
 
 The Dvoretzky–Kiefer–Wolfowitz Inequality^[[3]](https://en.wikipedia.org/wiki/Dvoretzky%E2%80%93Kiefer%E2%80%93Wolfowitz_inequality)^ allows for the construction of simultaneous confidence bands around the Emperical CDF. The inequality is non-parametric so it is not necessary to first fit a distribution to the total daily loss. We will choose \(\alpha = 0.05\). The inequality states:
@@ -310,7 +305,6 @@ check_CDF(data = total_loss, alpha_for_DKW = 0.05) +
 
   # geom_vline(xintercept = 28500, col = "green") +
   # geom_vline(xintercept = 36500, col = "green")
-
 ```
 
 One weakness of the Dvoretzky–Kiefer–Wolfowitz bands is that their coverage probability is lower near the median of the distribution while higher near the tails. However, these bands very easily capture where the true CDF may lie.
@@ -333,10 +327,15 @@ k = floor(num_days*p + (p + 1)/3) + 1 # k is the index for the larger order stat
 CDF_bounds = get_clopper_pearson(x = k, n = num_days, alpha = 0.05)
 
 # Transform the bounds obtained above into quantiles of daily total loss using the Hyndman and Fan (1996) type 8 quantile estimator.
-CI = quantile(x = total_loss, probs = CDF_bounds, type = 8)
+CI = data.frame(Method = "Binomial CI on ECDF",
+                Nominal_Coverage_Probability = 1 - alpha,
+                LB = round(quantile(x = total_loss, probs = CDF_bounds[1], type = 8, names = FALSE), 2),
+                UB = round(quantile(x = total_loss, probs = CDF_bounds[2], type = 8, names = FALSE), 2),
+                row.names = NULL
+)
 ```
 
-**We are 95% confident that the `r p`-quantile lies between `r dollar(unname(CI[1]))` and `r dollar(unname(CI[2]))`.** 
+**We are 95% confident that the `r p`-quantile lies between `r dollar(CI$LB)` and `r dollar(CI$UB)`.** 
 
 # Bootstrapping the p-quantile--a Non-Parametric Approach
 
@@ -352,132 +351,25 @@ cpus_on_machine = detectCores()
 bootstrap_results_1 = boot(data = total_loss, statistic = find_qp, p = p, R = R, sim = "ordinary", parallel = "snow", ncpus = cpus_on_machine)
 
 alpha = 0.05
-CI_nonparametric = quantile(bootstrap_results_1$t[,1], p = c(alpha/2, 1-alpha/2), type = 8)
-dollar(CI_nonparametric)
+CI[2, "Method"] = "Bootstrap"
+CI[2, "Nominal_Coverage_Probability"] = 1 - alpha
+CI[2, "LB"] = round(quantile(bootstrap_results_1$t[,1], p = alpha/2, type = 8, names = FALSE), 0)
+CI[2, "UB"] = round(quantile(bootstrap_results_1$t[,1], p = 1 - alpha/2, type = 8, names = FALSE), 0)
 
 hist(bootstrap_results_1$t[,1], xlim = c(2.8e4, 3.6e4), nclass = 30, xlab = paste0(p, "-Quantile of Resampled Total Loss"), main = paste0("Bootstrap Estimate of ", p, "-Quantile of Total Loss\nR = ", R))
-abline(v = CI_nonparametric[1], col = "red")
-abline(v = CI_nonparametric[2], col = "red")
+abline(v = CI[2, "LB"], col = "red")
+abline(v = CI[2, "UB"], col = "red")
 ```
 
 This compares favorably with the CI obtained using the Empirical CDF.
 
-# Fitting a Distribution
+# Summary
 
-## Generalized Pareto
+```{r summary,echo=FALSE}
+CI$Length = with(CI, UB - LB)
+CI$Shape = with(CI, round((UB - p_quantile)/(p_quantile - LB), 2))
 
-```{r}
-generalized_pareto_CDF = function(x, mu, sigma, xi){
-  z = (x-mu)/sigma
-  Re(1 - as.complex(1 + xi * z)^(-1/xi))
-}
-
-generalized_pareto_PDF = function(x, mu, sigma, xi){
-  z = (x-mu)/sigma
-  Re(1 / sigma * as.complex(1 + xi * z)^(-1/(xi + 1)))
-}
-```
-
-### Method-of-Moments Estimation of the Parameters in the Generalized Pareto Distribution
-
-```{r}
-mu_tilde = 0 # I picked this value without using Method-of-Moments
-xi_tilde = 0.5 * (1 - (mean(total_loss) - mu_tilde)^2/var(total_loss))
-xi_tilde
-
-sigma_tilde = (mean(total_loss) - mu_tilde) * (1 - xi_tilde)
-sigma_tilde
-
-check_CDF(data = total_loss, alpha_for_DKW = 0.05, CDF_to_check = generalized_pareto_CDF, mu = mu_tilde, sigma = sigma_tilde, xi = xi_tilde) +
-  xlim(0,1e5) +
-  ylim(0.5, 1)
-```
-
-Is the log-likelihood stable at these method-of-moments estimates?
-
-```{r}
-get_log_likelihood_for_gp_for_optim = function(params){
-  get_log_likelihood(PDF = generalized_pareto_PDF, # taken from global env.
-                   data = total_loss, # taken from global env.
-                   mu = mu_tilde, # taken from global env.
-                   sigma = params["sigma_hat"], 
-                   xi = params["xi_hat"]
-  )
-}
-# params = c(sigma_tilde = 1e4, xi_tilde = 0.7)
-# get_log_likelihood(PDF = generalized_pareto_PDF, 
-#                    data = total_loss, 
-#                    mu = mu_tilde, 
-#                    sigma = params["sigma_tilde"], 
-#                    xi = params["xi_tilde"]
-#   )
-
-optim(par = c(sigma_hat = sigma_tilde, xi_hat = xi_tilde), 
-      fn = get_log_likelihood_for_gp_for_optim,
-      method = "L-BFGS-B",
-      lower = c(10, 0),
-      upper = c(5e6, 5e6),
-      control = list(parscale = c(1,1e-4),
-                     fnscale = -1)) # turn it into a maximization problem
-
-
-```
-
-
-
-## Skewed Generalized t Distribution
-
-# Fitting a Mixture Distribution
-
-# Select the best parametric model
-
-```{r}
-get_AIC = function(model_names = NULL, k, max_log_likelihood){
-  AIC_comparison = 2*k - 2 * max_log_likelihood
-  names(AIC_comparison) = model_names
-  AIC_comparison # lower is better
-}
-
-get_AIC(k = c(3, 3), max_log_likelihood = c(-20918.16, -20342.89))
-```
-
-# Bootstrapping the p-Quantile--A Parametric Approach
-
-```{r}
-# Reduce the number of replications to speed up computation time.
-R = 1e4
-# This calculates the bootstrap difference between the estimated p-quantile from a bootstrap sample of the fitted distribution and the point-estimate of the p-quantile from the original data. 
-delta_star = function(data, i, p, theta_hat){
-  quantile(data[i], p, type = 8, names = FALSE) - unname(theta_hat)
-}
-
-bootstrap_results_2 = boot(
-  data = rgp(n = num_days, mu = 0, sigma = 1e4, xi = 0.7), 
-  statistic = delta_star, 
-  p = p, 
-  theta_hat = p_quantile,
-  R = R, 
-  sim = "ordinary", 
-  parallel = "snow", 
-  ncpus = cpus_on_machine
-)
-
-
-alpha = 0.05
-CI_nonparametric = quantile(bootstrap_results_1$t[,1], p = c(alpha/2, 1-alpha/2), type = 8)
-dollar(CI_nonparametric)
-
-quantiles_of_delta_star = quantile(bootstrap_results_2$t[,1], p = c(alpha/2, 1-alpha/2), type = 8)
-CI_parametric = c(p_quantile - quantiles_of_delta_star[2],
-                  p_quantile - quantiles_of_delta_star[1])
-names(CI_parametric) = c(paste0((alpha/2) * 100, "%"),
-                         paste0((1 - alpha/2) * 100, "%")
-)
-CI_parametric
-
-hist(bootstrap_results_2$t[,1] + p_quantile, nclass = 30, xlab = "Bootstrap Error from Point-Estimate", main = paste0("Bootstrap Estimate of ", p, "-Quantile of Total Loss\nR = ", R))
-abline(v = CI_parametric[1], col = "red")
-abline(v = CI_parametric[2], col = "red")
+CI %>% kable(col.names = c("Method", "Nominal Coverage Probability", "LB", "UB", "Length", "Shape")) %>% kable_styling(full_width = FALSE)
 ```
 
 
@@ -493,6 +385,4 @@ abline(v = CI_parametric[2], col = "red")
 
 5. [Bootstrapping](https://ocw.mit.edu/courses/mathematics/18-05-introduction-to-probability-and-statistics-spring-2014/readings/MIT18_05S14_Reading24.pdf)
 
-6. [Mixture Models](https://stephens999.github.io/fiveMinuteStats/intro_to_mixture_models.html#definition)
-
-7. [Joint Distribution of Order Statistics](https://en.wikipedia.org/wiki/Order_statistic#The_joint_distribution_of_the_order_statistics_of_an_absolutely_continuous_distribution)
+6. [Bootstrapping](http://users.stat.umn.edu/~helwig/notes/bootci-Notes.pdf)
