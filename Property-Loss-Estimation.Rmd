@@ -351,17 +351,25 @@ cpus_on_machine = detectCores()
 bootstrap_results_1 = boot(data = total_loss, statistic = find_qp, p = p, R = R, sim = "ordinary", parallel = "snow", ncpus = cpus_on_machine)
 
 alpha = 0.05
-CI[2, "Method"] = "Bootstrap"
+CI[2, "Method"] = "Percentile Bootstrap"
 CI[2, "Nominal_Coverage_Probability"] = 1 - alpha
 CI[2, "LB"] = round(quantile(bootstrap_results_1$t[,1], p = alpha/2, type = 8, names = FALSE), 0)
 CI[2, "UB"] = round(quantile(bootstrap_results_1$t[,1], p = 1 - alpha/2, type = 8, names = FALSE), 0)
 
-hist(bootstrap_results_1$t[,1], xlim = c(2.8e4, 3.6e4), nclass = 30, xlab = paste0(p, "-Quantile of Resampled Total Loss"), main = paste0("Bootstrap Estimate of ", p, "-Quantile of Total Loss\nR = ", R))
+hist(bootstrap_results_1$t[,1], xlim = c(2.8e4, 3.6e4), nclass = 30, xlab = paste0(p, "-Quantile of Resampled Total Loss"), main = paste0("Percentile Bootstrap Estimate of ", p, "-Quantile of Total Loss\nR = ", R))
 abline(v = CI[2, "LB"], col = "red")
 abline(v = CI[2, "UB"], col = "red")
 ```
 
 This compares favorably with the CI obtained using the Empirical CDF.
+
+```{r}
+# We can also get a Basic Bootstrap CI for comparison.
+CI[3, "Method"] = "Basic Bootstrap"
+CI[3, "Nominal_Coverage_Probability"] = 1 - alpha
+CI[3, "LB"] = 2 * p_quantile - round(quantile(bootstrap_results_1$t[,1], p = 1 - alpha/2, type = 8, names = FALSE), 0)
+CI[3, "UB"] = 2 * p_quantile - round(quantile(bootstrap_results_1$t[,1], p = alpha/2, type = 8, names = FALSE), 0)
+```
 
 # Summary
 
