@@ -134,7 +134,7 @@ Let's test the null hypothesis that the proportion of non-zero claim days is the
 prop.test(x = prop_loss_grouped_2$num_non_zero_days, n = prop_loss_grouped_2$total_days)
 ```
 
-It appears likely at the 5% significance level that the proportion of non-zero claim days is not the same per month. In other words, there is an association between month and fire risk.
+It appears likely at the 1% significance level that the proportion of non-zero claim days is not the same per month. In other words, there is an association between month and fire risk.
 
 For the purposes of the present analysis, we will only try to estimate the p-quantile of total daily loss without reference to the month. In future studies, a hierarchical model could perhaps be built that looks at the number of claims that occur per month and uses that information to estimate a p-quantile on a month-by-month basis. Future studies could perhaps make use of the multinomial distribution and quantile regression.
 
